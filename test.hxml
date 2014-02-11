@@ -1,0 +1,6 @@
+-cp lib/hxparse/src
+-cp lib/hxparse/test
+-cp src
+-cp test
+-main Sample
+-neko bin/sample.n

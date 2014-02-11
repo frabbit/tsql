@@ -1,0 +1,4 @@
+[submodule "lib/hxparse"]
+	path = lib/hxparse
+	url = git@github.com:Simn/hxparse.git
+	branch = development
