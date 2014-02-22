@@ -40,6 +40,13 @@ class SqlParser extends hxparse.Parser<SqlLexer, Token> implements hxparse.Parse
 	public function parse() {
 		return parseStatement();
 	}
+
+	public function parseStatements():Array<Statement> {
+		return switch stream {
+			case [ l = parseList(parseStatement, semicolon, false, true) ]:
+				l;
+		}
+	}
 	
 	override function peek(n) {
 		return if (n == 0)
@@ -179,29 +186,15 @@ class SqlParser extends hxparse.Parser<SqlLexer, Token> implements hxparse.Parse
 	
 
 
-	//function comma() {
-	//	return switch stream {
-	//		case [{tok:Comma}]:
-	//	}
-	//}
+	function comma() {
+		return switch stream {
+			case [{tok:Comma}]:
+		}
+	}
 
 	function semicolon() {
-		return /*if (last.tok == BrClose) {
-			switch stream {
-				case [{tok: Semicolon, pos:p}]: p;
-				case _: last.pos;
-			}
-		} else*/ switch stream {
-			case [{tok: Semicolon, pos:p}]: p;
-			case _:
-				var pos = last.pos;
-				if (doResume)
-					pos
-				else
-					throw {
-						msg: MissingSemicolon,
-						pos: pos
-					}
+		return switch stream {
+			case [{tok: Semicolon}]:
 		}
 	}
 	function parseIdent () {
@@ -420,7 +413,14 @@ class SqlParser extends hxparse.Parser<SqlLexer, Token> implements hxparse.Parse
 		return parseCommaSeparatedList(f, true);
 	}
 
+
+
 	function parseCommaSeparatedList <T>(f:Void->T, nonEmpty = false):Array<T>
+	{
+		return parseList(f, comma, nonEmpty);
+	}
+
+	function parseList <T>(f:Void->T, separator : Void->Dynamic, nonEmpty = false, allowLeadingSeparator = false):Array<T>
 	{
 		var r = [];
 		var br = false;
@@ -432,10 +432,12 @@ class SqlParser extends hxparse.Parser<SqlLexer, Token> implements hxparse.Parse
 				case [e = f()]:
 					r.push(e);
 					switch stream {
-						case [{tok: Comma}]:
+						case [_ = separator()]:
 						case _: 
 							br = true;
 					}
+				case [{tok:Eof} && allowLeadingSeparator]:
+					br = true;
 			}
 		}
 		} catch(e:hxparse.NoMatch<Dynamic>) {

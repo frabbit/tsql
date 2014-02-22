@@ -66,13 +66,12 @@ class Sample {
 		parseAndPrint("SELECT t.a as x, u.x as y FROM u, t");
 	*/
 
-		var cr = parse("
+		
+		var cr = parseStatements("
 			CREATE TABLE user (	
 				name TINYINT(2) Not Null Default 2 AUTO_INCREMENT UNIQUE KEY,
 				first VARCHAR(255) Not Null PRIMARY KEY
-			) ENGINE=innodb AUTO_INCREMENT=1
-		");
-		var cr2 = parse("
+			) ENGINE=innodb AUTO_INCREMENT=1;
 			CREATE TABLE persons (	
 				name INT Not Null Default 2 AUTO_INCREMENT UNIQUE KEY,
 				second VARCHAR(255) Not Null PRIMARY KEY,
@@ -80,10 +79,17 @@ class Sample {
 			) ENGINE=innodb AUTO_INCREMENT=1
 		");
 
-		var ctx = tsql.ContextBuilder.build([cr, cr2]);
+
+		
+
+		var ctx = tsql.ContextBuilder.build(cr);
 		trace(ctx);
 
 		parseTypeAndShow('SELECT u.name from user as u, persons as p where u.name = ?', ctx);
+
+
+		//parseStatementsAndShow("SELECT u.name from user; SELECT u.name from user;");
+
 
 		//parseAndShow("SELECT name from age");
 		//parseAndShow("SELECT name from user as u, adress");
@@ -99,6 +105,10 @@ class Sample {
 	public static function parseAndShow(sql:String) {
 		trace(sql);
 		trace(Std.string(parse(sql)));
+	}
+	public static function parseStatementsAndShow(sql:String) {
+		trace(sql);
+		trace(Std.string(parseStatements(sql)));
 	}
 
 	public static function parseTypeAndShow(sql:String, ctx:Context) {
@@ -120,6 +130,15 @@ class Sample {
 
 
 		return parser.parse();
+	}
+
+	public static function parseStatements (sqlStatements:String) {
+		var input = byte.ByteData.ofString(sqlStatements);
+		
+		var parser = new tsql.SqlParser(input, "sql");
+
+
+		return parser.parseStatements();
 	}
 
 	#end
