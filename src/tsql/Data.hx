@@ -400,7 +400,7 @@ enum Keyword {
 	KwdFrom;
 	KwdFulltext;
 	KwdGoto;
-	KwdGrant	;
+	KwdGrant;
 	KwdGroup;
 	KwdHaving;
 	KwdHigh_priority;

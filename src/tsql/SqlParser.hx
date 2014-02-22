@@ -204,7 +204,12 @@ class SqlParser extends hxparse.Parser<SqlLexer, Token> implements hxparse.Parse
 					}
 		}
 	}
-
+	function parseIdent () {
+		return switch stream {
+			case [{tok:Ident(x)}]:
+				x;
+		}
+	}
 
 	function secureExpr () {
 		return parseExpr();
@@ -236,7 +241,7 @@ class SqlParser extends hxparse.Parser<SqlLexer, Token> implements hxparse.Parse
 				// keyword function
 				// check if valid function
 				var ident = kwd.getName().substr(3).toLowerCase();
-				exprNext(EFunction(ident, exprs));
+				exprNext(EFunctionCall(ident, exprs));
 				
 			case [{ tok : POpen}, e = secureExpr(), { tok : PClose}]:
 				exprNext(EParenthesis(e));
@@ -269,23 +274,29 @@ class SqlParser extends hxparse.Parser<SqlLexer, Token> implements hxparse.Parse
 				var name = switch (e1) { case EIdent(n): n; case _ : unexpected();};
 				switch stream {
 					case [exprs = parseExprs(), {tok:PClose}]:
-						exprNext(EFunction(name, exprs));
+						exprNext(EFunctionCall(name, exprs));
 					case _ : unexpected();
 				}
-
-
 			case [{ tok:Binop(op) }]:
-				exprNext(EBinop(op, e1, secureExpr()));
+				exprNext(EBinop(op, identToColumn(e1), secureExpr()));
 			case [{ tok:Kwd(KwdAnd)}]:
-				exprNext(EBinop(OpBoolAnd, e1, secureExpr()));
+				exprNext(EBinop(OpBoolAnd, identToColumn(e1), secureExpr()));
 			case [{ tok:Kwd(KwdOr)}]:
-				exprNext(EBinop(OpBoolOr, e1, secureExpr()));
-			case _ : e1;
+				exprNext(EBinop(OpBoolOr, identToColumn(e1), secureExpr()));
+			case _ : 
+				identToColumn(e1);
 		}
 	}
 
-	function parseNamedExpr () {
-		
+	function identToColumn (e:Expr) {
+		return switch (e) {
+			case EIdent(x): EColumn(x, None);
+			case _ : e;
+		}
+	}
+
+	function parseNamedExpr () 
+	{
 		return switch stream {
 			case [e = parseExpr()]:
 				switch stream {
@@ -294,7 +305,6 @@ class SqlParser extends hxparse.Parser<SqlLexer, Token> implements hxparse.Parse
 					case _ :
 						e;
 				}
-				
 		}
 	}
 
@@ -319,7 +329,6 @@ class SqlParser extends hxparse.Parser<SqlLexer, Token> implements hxparse.Parse
 		}
 	}
 
-
 	function parseTableReferenceNext (t1:TableReference) 
 	{
 		return switch stream 
@@ -340,17 +349,10 @@ class SqlParser extends hxparse.Parser<SqlLexer, Token> implements hxparse.Parse
 
 				var r = switch stream {
 					case [{tok:Kwd(KwdOuter)}, {tok:Kwd(KwdJoin)}, t2 = parseTableReference(), c = parseJoinCondition()]:
-						trace("join1");
 						parseTableReferenceNext(TrJoinTable(t1, [joinOp, JOuter], t2, Some(c)));
 					case [{tok:Kwd(KwdJoin)}, t2 = parseTableReference(), c = parseJoinCondition() ]:
-						trace("join2");
 						parseTableReferenceNext(TrJoinTable(t1, [joinOp], t2, Some(c) ));
-
-					
-						
-						
 				}
-				trace("after");
 				r;
 			case _ : 
 				t1;
@@ -506,9 +508,9 @@ class SqlParser extends hxparse.Parser<SqlLexer, Token> implements hxparse.Parse
 		}		
 	}
 
-	function ident (i:String) {
+	function ident (i:String, cs = false) {
 		return switch stream {
-			case [{tok:Ident(x)} && x.toLowerCase() == i.toLowerCase()]:
+			case [{tok:Ident(x)} && ((!cs && x.toLowerCase() == i.toLowerCase()) || (cs && x == i)) ]:
 				x;
 		}
 	}
@@ -577,6 +579,101 @@ class SqlParser extends hxparse.Parser<SqlLexer, Token> implements hxparse.Parse
 		
 	}
 
+	function parseExprOrDefault () {
+		return switch stream {
+			case [{tok:Kwd(KwdDefault)}]:
+				EDDefault;
+			case [e = parseExpr()]:
+				EDExpr(e);
+		}
+	}
+
+	function parseSet () {
+		return switch stream 
+		{
+			case [{tok:Ident(x)}, {tok:Binop(OpEq)}, ex = parseExprOrDefault()]:
+				
+				{ col : x, expr : ex }
+		}
+	}
+
+	function parseSets() {
+		return switch stream 
+		{
+			case [{tok:Kwd(KwdSet)}, sets = parseNonEmptyCommaSeparatedList(parseSet)]:
+				sets;
+		}
+	}
+
+
+	function parseUpdate ():Update 
+	{
+		function parseUpdateLimit () {
+			return switch stream {
+				case [{tok:Kwd(KwdLimit)}, {tok:Const(CInt(x))}]:
+					var x = Std.parseInt(x);
+					if (x != null && x > 0) {
+						x;
+					} else {
+						unexpected();
+					}
+			}
+		}	
+		return switch stream 
+		{
+			case [
+				refs = parseTableReferences(),
+				sets = parseSets(),
+				where = popt(parseWhere), 
+				orderBy = popt(parseOrderBy),
+				limit = popt(parseUpdateLimit)
+
+				]:
+				Update(refs, sets, where, orderBy, limit);
+				
+			case _ : unexpected();
+		}
+		
+	}
+
+	function parseIdentWithExpr () {
+		return switch stream {
+			case [{tok:Ident(x)}, {tok:Binop(OpEq)}, e = parseExpr()]:
+				{ col : x, expr : e};
+		}
+	}
+	function parseInsert ():Insert
+	{
+		return switch stream 
+		{
+			case [_ = optKwd(KwdInto), {tok:Ident(tableName)}]:
+				var f = switch stream {
+					case [sets = parseSets()]:
+						function (x) return InsertWithSets(tableName, sets, x);
+					case [{tok:POpen}, idents = parseNonEmptyCommaSeparatedList(parseIdent), {tok:PClose}]:
+						
+						switch stream {
+							case [{tok:Kwd(KwdValues)}, {tok:POpen}, values = parseNonEmptyCommaSeparatedList(parseExprOrDefault), {tok:PClose}]:
+								var sets = if (idents.length != values.length) unexpected();
+								else {
+									[for (i in 0...idents.length) { col : idents[i], expr : values[i]}];
+								}
+								function (x) return InsertWithSets(tableName, sets, x);
+							case [{tok:Kwd(KwdSelect)}, s = parseSelect()]:
+								function (x) return InsertWithSelect(tableName, idents, s, x);
+						}
+				}
+				switch stream {
+					case [{tok:Kwd(KwdOn)},_ = ident("duplicate"), {tok:Kwd(KwdKey)},{tok:Kwd(KwdUpdate)}, idents = parseNonEmptyCommaSeparatedList(parseIdentWithExpr)]:
+						f(Some(idents));
+					case _ : f(None);
+				}
+				
+				
+			case _ : unexpected();
+		}
+	}
+
 	function optKwd (k:Data.Keyword) {
 
 		return switch stream {
@@ -614,23 +711,31 @@ class SqlParser extends hxparse.Parser<SqlLexer, Token> implements hxparse.Parse
 
 		return switch stream {
 			case [{tok:Kwd(KwdTinyint)}, len = popt(parseLen), u = parseUnsigned()]:
-				STTinyInt(len, u);
+				STInt(ILTinyInt(len, u));
 			case [{tok:Kwd(KwdSmallint)}, len = popt(parseLen), u = parseUnsigned()]:
-				STSmallInt(len,u);
+				STInt(ILSmallInt(len,u));
 			case [{tok:Kwd(KwdMediumint)}, len = popt(parseLen), u = parseUnsigned()]:
-				STMediumInt(len,u);
+				STInt(ILMediumInt(len,u));
 			case [{tok:Kwd(KwdInt)}, len = popt(parseLen), u = parseUnsigned()]:
-				STInt(len, u);
+				STInt(ILInt(len, u));
 			case [{tok:Kwd(KwdVarchar)}, len = parseLen()]:
-				STVarChar(len);
+				STString(SLVarChar(len));
+			case [{tok:Kwd(KwdTinytext)}, binary = optKwd(KwdBinary)]:
+				STString(SLTinyText(binary));
+			case [_ = ident("text"), binary = optKwd(KwdBinary)]:
+				STString(SLText(binary));
+			case [{tok:Kwd(KwdMediumtext)}, binary = optKwd(KwdBinary)]:
+				STString(SLMediumText(binary));
+			case [{tok:Kwd(KwdLongtext)}, binary = optKwd(KwdBinary)]:
+				STString(SLLongText(binary));
 			case [_ = ident("date")]:
-				STDate;
+				STDateOrTime(DTDate);
 			case [_ = ident("datetime")]:
-				STDateTime;
+				STDateOrTime(DTDateTime);
 			case [_ = ident("time")]:
-				STTime;
+				STDateOrTime(DTTime);
 			case [_ = ident("timestamp")]:
-				STTimestamp;
+				STDateOrTime(DTTimestamp);
 		}
 	}
 
@@ -714,7 +819,7 @@ class SqlParser extends hxparse.Parser<SqlLexer, Token> implements hxparse.Parse
 		}
 	}
 
-	function parseTableSchema() 
+	function parseTableSchema(tableName:String) 
 	{
 
 		function endOfOptionList(x:TokenDef) {
@@ -731,14 +836,16 @@ class SqlParser extends hxparse.Parser<SqlLexer, Token> implements hxparse.Parse
 					}
 				];
 				var columnsMap:Map<String,TableColumn> = [for (c in columns) c.name => c];
-				{ columns : columnsMap, options : options };
+				var x = { columns : columnsMap, options : options, toString : null, name : tableName };
+				x.toString = TableSchemas.toString.bind(x);
+				x;
 		}
 	}
 
 	function parseCreate ():Create 
 	{
 		return switch stream {
-			case [{tok:Kwd(KwdTable)}, {tok:Ident(x)}, s = parseTableSchema()]:
+			case [{tok:Kwd(KwdTable)}, {tok:Ident(x)}, s = parseTableSchema(x)]:
 				CSchema(s);
 		}
 	}
@@ -751,6 +858,10 @@ class SqlParser extends hxparse.Parser<SqlLexer, Token> implements hxparse.Parse
 				StSelect(s);
 			case [{tok:Kwd(KwdCreate)}, s = parseCreate()]:
 				StCreate(s);
+			case [{tok:Kwd(KwdUpdate)}, s = parseUpdate()]:
+				StUpdate(s);
+			case [{tok:Kwd(KwdInsert)}, s = parseInsert()]:
+				StInsert(s);
 		}
 	}
 

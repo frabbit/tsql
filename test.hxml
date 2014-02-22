@@ -2,5 +2,7 @@
 -cp lib/hxparse/test
 -cp src
 -cp test
+-D dump=pretty
 -main Sample
 -neko bin/sample.n
+

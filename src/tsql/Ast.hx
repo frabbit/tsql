@@ -29,13 +29,14 @@ enum Literal {
 
 
 
+
 enum Expr {
 	ENamed(e:Expr, as:String);
 	EAllColumns(table:Option<String>);
 	EColumn(n:String, table:Option<String>);
 	EIdent(n:String);
 	EConst(c:Constant);
-	EFunction(name:String, params:Array<Expr>);
+	EFunctionCall(name:String, params:Array<Expr>);
 	EBinop(op:Binop, e1:Expr, e2:Expr);
 	EUnop(op:Unop, e:Expr);
 	ETernop(e1:Expr, op:Ternop, e2:Expr, e3:Expr);
@@ -84,13 +85,36 @@ enum Create {
 
 
 enum Update {
-	USimple(table:String, sets:Array<{ col : String, expr:Expr}>, where:Option<Expr>, orderBy:Option<OrderBy>, limit:Option<Int>);
+	Update(tables:TableReferences, sets:Array<{ col : String, expr:ExprOrDefault}>, where:Option<Expr>, orderBy:Option<OrderBy>, limit:Option<Int>);
+}
+
+enum ExprOrDefault {
+	EDDefault;
+	EDExpr(e:Expr);
 }
 
 enum Insert {
-	UInsert(table:String, sets:Array<{ col : String, expr:Expr}>, where:Option<Expr>, orderBy:Option<OrderBy>, limit:Option<Int>);
+	InsertWithSets(table:String, sets:Array<{ col : String, expr:ExprOrDefault}>, duplicateKeyUpdate:Option<Array<{col:String, expr:Expr}>>);
+	InsertWithSelect(table:String, cols:Array<String>, s:Select, duplicateKeyUpdate:Option<Array<{col:String, expr:Expr}>>);
 }
 
+
+typedef IndexOption = {}
+
+enum AlterSpec {
+	AsAddColumn(c:TableColumn);
+	AsAddColumns(c:Array<TableColumn>);
+	AsModifyColumn(c:TableColumn);
+	AsDropColumn(colName:String);
+	AsChangeColumn(oldName:String, newDef:TableColumn);
+	AsRenameTable(newTableName:String);
+	AsAddIndex(indexName:Option<String>, indexType:Option<String>, cols:Array<String>, opt:Array<IndexOption>);
+}
+
+typedef AlterTable = {
+	name:String,
+	changes : Array<AlterSpec>
+}
 
 
 enum Statement {
@@ -98,6 +122,7 @@ enum Statement {
 	StCreate(s:Create);
 	StUpdate(u:Update);
 	StInsert(x:Insert);
+	StAlterTable(x:AlterTable);
 }
 
 
@@ -138,8 +163,8 @@ enum Unop {
 }
 
 enum Ternop {
-	Between;
-	NotBetween;
+	OpBetween;
+	OpNotBetween;
 }
 
 
@@ -174,13 +199,6 @@ enum JoinCondition  {
 	JcUsing(ex:Array<Expr>);
 }
 
-//enum TableJoin {
-//	TjInnerJoin(tf:TableFactor, cond:Option<JoinCondition>);
-//	TjCrossJoin(tf:TableFactor, cond:Option<JoinCondition>);
-//	TjStraightJoin(tf:TableFactor, cond:Option<ContitionalExpr>);
-//	TjJoin(side:TableJoinSide, outer:Bool, tr:TableReference, cond:JoinCondition);
-//	Natural(side:TableJoinSide, outer:Bool, tf:TableFactor);
-//}
 
 enum TableReference  {
 
@@ -256,6 +274,16 @@ enum CreateDef {
 }
 
 typedef TableSchema = {
+	name : String,
 	options: Array<TableOption>,
-	columns : Map<String,TableColumn>
+	columns : Map<String,TableColumn>,
+	toString : Void->String
 }
+
+class TableSchemas {
+	public static function toString (x:TableSchema) {
+		return "{ name : '" + x.name + "', options : " + Std.string(x.options)
+			+ ", columns : " + Std.string(x.columns) + " }";
+	}
+}
+
